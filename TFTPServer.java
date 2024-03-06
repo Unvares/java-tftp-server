@@ -57,31 +57,34 @@ public class TFTPServer {
       final int reqtype = ParseRQ(buf, requestedFile);
 
       new Thread() {
-        public void run() {
-          try {
-            DatagramSocket sendSocket = new DatagramSocket(0);
+    	public void run() {
+        try {
+          DatagramSocket sendSocket = new DatagramSocket(0);
 
-            // Connect to client
-            sendSocket.connect(clientAddress);
+          // Connect to client
+          sendSocket.connect(clientAddress);
 
-            System.out.printf("%s request for %s from %s using port %d\n",
-                (reqtype == OP_RRQ) ? "Read" : "Write",
-                clientAddress.getHostName(), clientAddress.getPort());
+          System.out.printf("%s request for %s from %s using port %d\n",
+            (reqtype == OP_RRQ) ? "Read" : "Write",
+            requestedFile.toString(),
+            clientAddress.getHostName(),
+            clientAddress.getPort()
+          );
 
-            // Read request
-            if (reqtype == OP_RRQ) {
-              requestedFile.insert(0, READDIR);
-              HandleRQ(sendSocket, requestedFile.toString(), OP_RRQ);
-            }
-            // Write request
-            else {
-              requestedFile.insert(0, WRITEDIR);
-              HandleRQ(sendSocket, requestedFile.toString(), OP_WRQ);
-            }
-            sendSocket.close();
-          } catch (SocketException e) {
-            e.printStackTrace();
+          // Read request
+          if (reqtype == OP_RRQ) {
+            requestedFile.insert(0, READDIR);
+            HandleRQ(sendSocket, requestedFile.toString(), OP_RRQ);
           }
+          // Write request
+          else {
+            requestedFile.insert(0, WRITEDIR);
+            HandleRQ(sendSocket, requestedFile.toString(), OP_WRQ);
+          }
+          sendSocket.close();
+        } catch (SocketException e) {
+          e.printStackTrace();
+        }
         }
       }.start();
     }
@@ -137,13 +140,13 @@ public class TFTPServer {
   private void HandleRQ(DatagramSocket sendSocket, String requestedFile, int opcode) {
     if (opcode == OP_RRQ) {
       // See "TFTP Formats" in TFTP specification for the DATA and ACK packet contents
-      boolean result = send_DATA_receive_ACK(params);
+      boolean result = send_DATA_receive_ACK();
     } else if (opcode == OP_WRQ) {
-      boolean result = receive_DATA_send_ACK(params);
+      boolean result = receive_DATA_send_ACK();
     } else {
       System.err.println("Invalid request. Sending an error packet.");
       // See "TFTP Formats" in TFTP specification for the ERROR packet contents
-      send_ERR(params);
+      send_ERR();
       return;
     }
   }
