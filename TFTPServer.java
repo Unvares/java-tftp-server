@@ -95,10 +95,18 @@ public class TFTPServer {
 	 */
 	private InetSocketAddress receiveFrom(DatagramSocket socket, byte[] buf) {
 		// Create datagram packet
+		DatagramPacket packet = new DatagramPacket(buf, buf.length);
 
 		// Receive packet
+		try {
+			socket.receive(packet);
+		} catch (IOException e) {
+			e.printStackTrace();
+			return null;
+		}
 
 		// Get client address and port from the packet
+		InetSocketAddress socketAddress = (InetSocketAddress) packet.getSocketAddress();
 
 		return socketAddress;
 	}
