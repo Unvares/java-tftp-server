@@ -6,6 +6,8 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.nio.Buffer;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 public class TFTPServer {
@@ -128,12 +130,14 @@ public class TFTPServer {
     // See "TFTP Formats" in TFTP specification for the RRQ/WRQ request contents
     int opcode = buf[0];
     opcode += buf[1];
-    for (int i = 2; i < BUFSIZE-1; i++) {
-      if (buf[i] == 0) {
-        break;
-      } else {
-        String part = new String(buf, i, 1, StandardCharsets.UTF_8);
-        requestedFile.append(part);
+    if(opcode == 1 || opcode == 2){
+      for (int i = 2; i < BUFSIZE-1; i++) {
+        if (buf[i] == 0) {
+          break;
+        } else {
+          String part = new String(buf, i, 1, StandardCharsets.UTF_8);
+          requestedFile.append(part);
+        }
       }
     }
     return opcode;
@@ -151,7 +155,11 @@ public class TFTPServer {
       // See "TFTP Formats" in TFTP specification for the DATA and ACK packet contents
       boolean result = send_DATA_receive_ACK();
     } else if (opcode == OP_WRQ) {
-      boolean result = receive_DATA_send_ACK();
+
+      while (result) {
+        boolean result = receive_DATA_send_ACK(sendSocket);
+      }
+      
     } else {
       System.err.println("Invalid request. Sending an error packet.");
       // See "TFTP Formats" in TFTP specification for the ERROR packet contents
@@ -167,8 +175,16 @@ public class TFTPServer {
     return true;
   }
 
-  private boolean receive_DATA_send_ACK() {
-    return true;
+  private boolean receive_DATA_send_ACK(DatagramPacket sendSocket, String fileToWrite) {
+    Byte[] dataPacket = sendSocket.getData();
+    int opcode = ParseRQ(dataPacket, null);
+    if (opcode == OP_DAT) {
+      sendSocket.setData(acknowledgementPacket);
+      sendSocket.send();
+      return true;
+    } else {
+      return false;
+    }
   }
 
   private void send_ERR() {
