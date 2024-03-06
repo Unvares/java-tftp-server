@@ -6,6 +6,7 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.nio.charset.StandardCharsets;
 
 public class TFTPServer {
   public static final int TFTPPORT = 4970;
@@ -127,6 +128,14 @@ public class TFTPServer {
     // See "TFTP Formats" in TFTP specification for the RRQ/WRQ request contents
     int opcode = buf[0];
     opcode += buf[1];
+    for (int i = 2; i < BUFSIZE-1; i++) {
+      if (buf[i] == 0) {
+        break;
+      } else {
+        String part = new String(buf, i, 1, StandardCharsets.UTF_8);
+        requestedFile.append(part);
+      }
+    }
     return opcode;
   }
 
