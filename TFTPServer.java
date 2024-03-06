@@ -87,28 +87,31 @@ public class TFTPServer {
     }
   }
 
-  /**
-   * Reads the first block of data, i.e., the request for an action (read or
-   * write).
-   * 
-   * @param socket (socket to read from)
-   * @param buf    (where to store the read data)
-   * @return socketAddress (the socket address of the client)
-   */
-  private InetSocketAddress receiveFrom(DatagramSocket socket, byte[] buf) {
-    // Create datagram packet
-    DatagramPacket packet = new DatagramPacket(buf, buf.length);
-    // Receive packet
-    try {
-      socket.receive(packet);
-    } catch (IOException e) {
-      e.printStackTrace();
-      return null;
-    }
-    // Get client address and port from the packet
-    InetSocketAddress socketAddress = (InetSocketAddress) packet.getSocketAddress();
-    return socketAddress;
-  }
+	/**
+	 * Reads the first block of data, i.e., the request for an action (read or
+	 * write).
+	 * 
+	 * @param socket (socket to read from)
+	 * @param buf    (where to store the read data)
+	 * @return socketAddress (the socket address of the client)
+	 */
+	private InetSocketAddress receiveFrom(DatagramSocket socket, byte[] buf) {
+		// Create datagram packet
+		DatagramPacket packet = new DatagramPacket(buf, buf.length);
+
+		// Receive packet
+		try {
+			socket.receive(packet);
+		} catch (IOException e) {
+			e.printStackTrace();
+			return null;
+		}
+
+		// Get client address and port from the packet
+		InetSocketAddress socketAddress = (InetSocketAddress) packet.getSocketAddress();
+
+		return socketAddress;
+	}
 
   /**
    * Parses the request in buf to retrieve the type of request and requestedFile
