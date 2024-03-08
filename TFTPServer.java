@@ -8,6 +8,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.channels.FileChannel;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
@@ -160,8 +161,33 @@ public class TFTPServer {
    */
   private void HandleRQ(DatagramSocket sendSocket, String requestedFile, int opcode) {
     if (opcode == OP_RRQ) {
-      // See "TFTP Formats" in TFTP specification for the DATA and ACK packet contents
-      boolean result = send_DATA_receive_ACK(sendSocket, requestedFile);
+      // Open the file
+      Path filePath = Paths.get(requestedFile);
+      try (FileChannel fileChannel = FileChannel.open(filePath)) {
+        ByteBuffer buffer = ByteBuffer.allocate(BUFSIZE);
+        int bytesRead = fileChannel.read(buffer);
+        short blockNumber = 1;
+
+        while (bytesRead != -1) {
+          buffer.flip();
+          byte[] fileData = new byte[bytesRead];
+          buffer.get(fileData);
+
+          boolean result = send_DATA_receive_ACK(sendSocket, fileData, blockNumber);
+          if (!result) {
+            System.err.println("Error sending data or receiving acknowledgment");
+            send_ERR();
+            return;
+          }
+
+          buffer.clear();
+          bytesRead = fileChannel.read(buffer);
+          blockNumber++;
+        }
+      } catch (IOException e) {
+        System.err.println("Error reading file: " + e.getMessage());
+        send_ERR();
+      }
     } else if (opcode == OP_WRQ) {
       File file = new File(requestedFile);
       if (file.exists()) {
@@ -207,25 +233,16 @@ public class TFTPServer {
     }
   }
 
-  private boolean send_DATA_receive_ACK(DatagramSocket sendSocket, String requestedFile) {
+  private boolean send_DATA_receive_ACK(DatagramSocket sendSocket, byte[] fileData, short blockNumber) {
     try {
-      // Read the requested file
-      Path filePath = Paths.get(requestedFile);
-      byte[] fileData = Files.readAllBytes(filePath);
-
-      // Truncate the data to 512 bytes if it's larger
-      if (fileData.length > 512) {
-        fileData = Arrays.copyOfRange(fileData, 0, 512);
-      }
-
       // Create a buffer for the data packet
       byte[] dataBuffer = new byte[4 + fileData.length];
 
       // Set the opcode to DATA
       dataBuffer[0] = 0;
       dataBuffer[1] = OP_DAT;
-      dataBuffer[2] = 0;
-      dataBuffer[3] = 1;
+      dataBuffer[2] = (byte) (blockNumber >> 8);
+      dataBuffer[3] = (byte) blockNumber;
 
       // Copy the file data into the buffer
       System.arraycopy(fileData, 0, dataBuffer, 4, fileData.length);
