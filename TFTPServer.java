@@ -4,6 +4,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
@@ -12,6 +16,7 @@ import java.net.SocketException;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public class TFTPServer {
   public static final int TFTPPORT = 4970;
@@ -74,7 +79,8 @@ public class TFTPServer {
                 (reqtype == OP_RRQ) ? "Read" : "Write",
                 requestedFile.toString(),
                 clientAddress.getHostName(),
-                clientAddress.getPort());
+                clientAddress.getPort()
+            );
 
             // Read request
             if (reqtype == OP_RRQ) {
@@ -155,7 +161,7 @@ public class TFTPServer {
   private void HandleRQ(DatagramSocket sendSocket, String requestedFile, int opcode) {
     if (opcode == OP_RRQ) {
       // See "TFTP Formats" in TFTP specification for the DATA and ACK packet contents
-      boolean result = send_DATA_receive_ACK();
+      boolean result = send_DATA_receive_ACK(sendSocket, requestedFile);
     } else if (opcode == OP_WRQ) {
       File file = new File(requestedFile);
       if (file.exists()) {
@@ -201,11 +207,62 @@ public class TFTPServer {
     }
   }
 
-  /**
-   * To be implemented
-   */
-  private boolean send_DATA_receive_ACK() {
-    return true;
+  private boolean send_DATA_receive_ACK(DatagramSocket sendSocket, String requestedFile) {
+    try {
+      // Read the requested file
+      Path filePath = Paths.get(requestedFile);
+      byte[] fileData = Files.readAllBytes(filePath);
+
+      // Truncate the data to 512 bytes if it's larger
+      if (fileData.length > 512) {
+        fileData = Arrays.copyOfRange(fileData, 0, 512);
+      }
+
+      // Create a buffer for the data packet
+      byte[] dataBuffer = new byte[4 + fileData.length];
+
+      // Set the opcode to DATA
+      dataBuffer[0] = 0;
+      dataBuffer[1] = OP_DAT;
+      dataBuffer[2] = 0;
+      dataBuffer[3] = 1;
+
+      // Copy the file data into the buffer
+      System.arraycopy(fileData, 0, dataBuffer, 4, fileData.length);
+
+      // Create and send the data packet
+      DatagramPacket dataPacket = new DatagramPacket(
+        dataBuffer,
+        dataBuffer.length,
+        sendSocket.getInetAddress(),
+        sendSocket.getPort()
+      );
+      sendSocket.send(dataPacket);
+
+      // Create a buffer for the acknowledgment packet
+      byte[] ackBuffer = new byte[4];
+      DatagramPacket ackPacket = new DatagramPacket(ackBuffer, ackBuffer.length);
+
+      // Receive the acknowledgment packet
+      sendSocket.receive(ackPacket);
+
+      // Create a ByteBuffer wrapping ackBuffer
+      ByteBuffer wrap = ByteBuffer.wrap(ackBuffer);
+
+      // Read the opcode as a short
+      short opcode = wrap.getShort();
+
+      // Check if the opcode is right
+      if (opcode == OP_ACK) {
+        return true;
+      } else {
+        return false;
+      }
+    } catch (IOException e) {
+      System.err.println("Error sending data or receiving acknowledgment: " + e.getMessage());
+      send_ERR();
+      return false;
+    }
   }
 
   /**
