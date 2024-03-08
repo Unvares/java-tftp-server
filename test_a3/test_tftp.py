@@ -5,7 +5,7 @@ import pytest
 @pytest.fixture(scope="module")
 def client():
     import tftpclient
-    return tftpclient.TFTPClient(('localhost', 12345), '/home/ubuntu/tftpdir/')
+    return tftpclient.TFTPClient(('localhost', 4970), '')
 
 
 # Get existing 50 byte file
