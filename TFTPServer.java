@@ -1,6 +1,8 @@
 package assignment3;
 
-import java.util.Arrays;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -11,13 +13,16 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.nio.Buffer;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public class TFTPServer {
   public static final int TFTPPORT = 4970;
   public static final int BUFSIZE = 516;
-  public static final String READDIR = "./test_a3/";
-  public static final String WRITEDIR = "./test_a3/";
+  public static final String READDIR = "test_a3/";
+  public static final String WRITEDIR = "test_a3/";
   // OP codes
   public static final int OP_RRQ = 1;
   public static final int OP_WRQ = 2;
@@ -133,12 +138,14 @@ public class TFTPServer {
     // See "TFTP Formats" in TFTP specification for the RRQ/WRQ request contents
     int opcode = buf[0];
     opcode += buf[1];
-    for (int i = 2; i < BUFSIZE - 1; i++) {
-      if (buf[i] == 0) {
-        break;
-      } else {
-        String part = new String(buf, i, 1, StandardCharsets.UTF_8);
-        requestedFile.append(part);
+    if (opcode == OP_RRQ || opcode == OP_WRQ) {
+      for (int i = 2; i < BUFSIZE - 1; i++) {
+        if (buf[i] == 0) {
+          break;
+        } else {
+          String part = new String(buf, i, 1, StandardCharsets.UTF_8);
+          requestedFile.append(part);
+        }
       }
     }
     return opcode;
@@ -156,7 +163,42 @@ public class TFTPServer {
       // See "TFTP Formats" in TFTP specification for the DATA and ACK packet contents
       boolean result = send_DATA_receive_ACK(sendSocket, requestedFile);
     } else if (opcode == OP_WRQ) {
-      boolean result = receive_DATA_send_ACK();
+      File file = new File(requestedFile);
+      if (file.exists()) {
+        System.out.println("The file is already present in the server. Deleting it now.");
+        file.delete();
+      }
+      try {
+        file.createNewFile();
+        FileOutputStream writer = new FileOutputStream(file);
+
+        // loops until all packets are received
+        short blockNumber = 0;
+        while (true) {
+          DatagramPacket dataPacket = receive_DATA_send_ACK(sendSocket, blockNumber);
+
+          if (dataPacket != null) {
+            byte[] data = dataPacket.getData();
+            writer.write(data, 4, dataPacket.getLength() - 4); // first 4 bytes are opcode and block number
+
+            blockNumber++;
+
+            if (dataPacket.getLength() - 4 < 512) {
+              System.out.println("Last packet recived");
+              sendSocket.send(getAckPacket(blockNumber));
+              break;
+            }
+          } else {
+            System.out.println("Something went wrong with reciving data!");
+            file.delete();
+            break;
+          }
+        }
+        writer.close();
+      } catch (IOException e) {
+        file.delete();
+        e.printStackTrace();
+      }
     } else {
       System.err.println("Invalid request. Sending an error packet.");
       // See "TFTP Formats" in TFTP specification for the ERROR packet contents
@@ -223,11 +265,63 @@ public class TFTPServer {
     }
   }
 
-  private boolean receive_DATA_send_ACK() {
-    return true;
+  /**
+   * Gives back the data if it recives any.
+   * 
+   * @param sendSocket The sender Socket
+   * @param blockNumber The current block number.
+   * @return The recived data if its correct block number.
+   */
+  private DatagramPacket receive_DATA_send_ACK(DatagramSocket sendSocket, short blockNumber) {
+    byte[] buf = new byte[BUFSIZE];
+    DatagramPacket dataPacket = new DatagramPacket(buf, buf.length);
+
+    try {
+      DatagramPacket ackPacket = getAckPacket(blockNumber);
+      sendSocket.send(ackPacket);
+      sendSocket.receive(dataPacket);
+      short packetBlockNumber = retrieveBlockNumber(dataPacket);
+      System.out.println("Recived block number " + packetBlockNumber);
+
+      if (packetBlockNumber == ++blockNumber) {
+        return dataPacket;
+      }
+    } catch (IOException e) {
+      System.err.println("Something went wrong with reciving data!");
+      e.printStackTrace();
+    }
+    return null;
   }
 
   private void send_ERR() {
     // To be implemented
+  }
+
+  /**
+   * Create the acknowledgement DatagramPacket.
+   * 
+   * @param blockNum The block number.
+   * @return The packet.
+   */
+  private DatagramPacket getAckPacket(short blockNum) {
+    byte[] acknowledgementPacket = new byte[4];
+    acknowledgementPacket[0] = (byte) (OP_ACK >> 8);
+    acknowledgementPacket[1] = (byte) OP_ACK;
+    acknowledgementPacket[2] = (byte) (blockNum >> 8);
+    acknowledgementPacket[3] = (byte) blockNum;
+
+    return new DatagramPacket(acknowledgementPacket, 4);
+  }
+  
+  /**
+   * Get the block number in short form.
+   * 
+   * @param dataPacket recived data
+   * @return block number
+   */
+  private short retrieveBlockNumber(DatagramPacket dataPacket) {
+    ByteBuffer wrapper = ByteBuffer.wrap(dataPacket.getData());
+    wrapper.getShort();
+    return wrapper.getShort(); // block number is stored in the second two bytes
   }
 }
