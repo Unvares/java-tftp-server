@@ -13,6 +13,7 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -275,17 +276,41 @@ public class TFTPServer {
   private DatagramPacket receive_DATA_send_ACK(DatagramSocket sendSocket, short blockNumber) {
     byte[] buf = new byte[BUFSIZE];
     DatagramPacket dataPacket = new DatagramPacket(buf, buf.length);
-
+    int retryCounter = 0;
+    DatagramPacket ackPacket = getAckPacket(blockNumber);
+    
     try {
-      DatagramPacket ackPacket = getAckPacket(blockNumber);
-      sendSocket.send(ackPacket);
-      sendSocket.receive(dataPacket);
-      short packetBlockNumber = retrieveBlockNumber(dataPacket);
-      System.out.println("Recived block number " + packetBlockNumber);
+      if (retryCounter == 3) {
+        System.out.println("Failed to many times");
+        return null;
 
-      if (packetBlockNumber == ++blockNumber) {
-        return dataPacket;
+      } else {
+
+        
+        sendSocket.send(ackPacket);
+        sendSocket.setSoTimeout(10000); //Time out occures in the packet is not recevied in 10s 
+        sendSocket.receive(dataPacket);
+        short packetBlockNumber = retrieveBlockNumber(dataPacket);
+        System.out.println("Recived block number " + packetBlockNumber);
+  
+        if (packetBlockNumber == ++blockNumber) {
+          return dataPacket;
+        } else {
+          System.out.println("Incorrect packet");
+          retryCounter = 0;
+          throw new SocketTimeoutException();
+        }
       }
+     
+    }catch (SocketTimeoutException se) {
+      System.out.println("Timedout! Resending!");
+      try {
+        sendSocket.send(ackPacket);
+      } catch (IOException e) {
+        System.err.println("Error in resending!");
+        e.printStackTrace();
+      }
+
     } catch (IOException e) {
       System.err.println("Something went wrong with reciving data!");
       e.printStackTrace();
