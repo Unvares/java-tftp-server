@@ -271,3 +271,30 @@ class TFTPClient:
             raise ValueError('Files are not the same.')
 
         return True
+    
+
+    # Send initial WRQ, then don't send any data at all
+    def putFileFailData(self, fn, sz, mode=b'octet'):
+        with self.newSocket() as sock:
+            
+            # Initial WRQ
+            req = self.createRequest(OP.WRQ, fn, mode)
+            sock.sendto(req, self.remote)
+            # Receive initial response ACK three times
+            try:
+                for _ in range(3):
+                    resp, ca = sock.recvfrom(1024)
+                    pkt = self.parsePacket(resp)
+                    self.checkACK(pkt['op'], pkt['bn'] != 0)
+                    time.sleep(4)
+            except socket.timeout:
+                raise ValueError('Timeout waiting for ACK.')
+            # There should be EXACTLY three transmissions (orig + 2 re),
+            # so this 4th one should timeout
+            try:
+                resp, ca = sock.recvfrom(1024)
+                pkt = self.parsePacket(resp)
+                self.checkACK(pkt['op'], pkt['bn'] != 0)
+            except socket.timeout:
+                pass
+        return True

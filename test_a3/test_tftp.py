@@ -25,6 +25,7 @@ def test_getFileWithWrongAckTwiceThenCorrect(client):
     client.getFileWithWrongAck(b'f3blks.bin', 2)
 
 
+@pytest.fixture(scope="module")
 # Get existing 50 byte file
 def test_GSBSmall(client):
     assert client.getFile(b'f50b.bin')
@@ -93,3 +94,7 @@ def test_GMBFail1stAck(client):
 # Get a large file and fail the first two ACKs every time
 def test_GMBFail2ndAck(client):
     assert client.getMultiBlockFileFailAck(b'f3blks.bin', 2)
+
+# Try and time out the server
+def test_NoDataSent(client):
+    assert client.putFileFailData(b'f50b.ul', 50)
