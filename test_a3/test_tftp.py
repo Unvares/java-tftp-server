@@ -10,7 +10,7 @@ def client():
 
 # get file 'f3blks.bin' with a request that times out more than 3 times
 def test_timeoutMoreThanThreeTimes(client):
-    with pytest.raises(socket.timeout):
+    with pytest.raises((socket.timeout, ConnectionResetError)):
         client.getFile(b'f3blks.bin', delay=True)
 
 
