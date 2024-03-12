@@ -13,6 +13,11 @@ def test_timeoutMoreThanThreeTimes(client):
     with pytest.raises((socket.timeout, ConnectionResetError)):
         client.getFile(b'f3blks.bin', delay=True)
 
+# Try and time out the server
+def test_NoDataSent(client):
+    with pytest.raises((socket.timeout, ConnectionResetError)):
+      client.putFileFailData(b'f13b.ul', 13)
+
 
 # Get file 'f3blks.bin' with wrong acknowledgement three times
 def test_getFileWithWrongAckThreeTimes(client):
@@ -95,6 +100,3 @@ def test_GMBFail1stAck(client):
 def test_GMBFail2ndAck(client):
     assert client.getMultiBlockFileFailAck(b'f3blks.bin', 2)
 
-# Try and time out the server
-def test_NoDataSent(client):
-    assert client.putFileFailData(b'f50b.ul', 50)

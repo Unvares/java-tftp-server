@@ -275,26 +275,30 @@ class TFTPClient:
 
     # Send initial WRQ, then don't send any data at all
     def putFileFailData(self, fn, sz, mode=b'octet'):
+        fc = b''
         with self.newSocket() as sock:
-            
-            # Initial WRQ
+            sock.settimeout(1)
             req = self.createRequest(OP.WRQ, fn, mode)
             sock.sendto(req, self.remote)
-            # Receive initial response ACK three times
-            try:
-                for _ in range(3):
-                    resp, ca = sock.recvfrom(1024)
-                    pkt = self.parsePacket(resp)
-                    self.checkACK(pkt['op'], pkt['bn'] != 0)
-                    time.sleep(4)
-            except socket.timeout:
-                raise ValueError('Timeout waiting for ACK.')
-            # There should be EXACTLY three transmissions (orig + 2 re),
-            # so this 4th one should timeout
+            resp, ca = sock.recvfrom(1024)
             try:
                 resp, ca = sock.recvfrom(1024)
+
                 pkt = self.parsePacket(resp)
                 self.checkACK(pkt['op'], pkt['bn'] != 0)
+
+                for blk in range(1, sz + 1):
+                    time.sleep(8)
+                    sbuf = np.random.bytes(512)
+                    req = self.createDATBuf(sbuf, blk)
+                    sock.sendto(req, ca)
+                    
+                    try:
+                        resp, _ = sock.recvfrom(1024)
+                        pkt = self.parsePacket(resp)
+                        self.checkACK(pkt['op'], pkt['bn'] != blk)
+                    except socket.timeout:
+                        raise socket.timeout('Timeout waiting for ACK.')
             except socket.timeout:
-                pass
+                raise socket.timeout('Timeout waiting for initial response from server.')
         return True
