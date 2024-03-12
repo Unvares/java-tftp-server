@@ -1,3 +1,4 @@
+import socket
 import pytest
 
 
@@ -6,6 +7,22 @@ import pytest
 def client():
     import tftpclient
     return tftpclient.TFTPClient(('localhost', 4970), '')
+
+# get file 'f3blks.bin' with a request that times out more than 3 times
+def test_timeoutMoreThanThreeTimes(client):
+    with pytest.raises(socket.timeout):
+        client.getFile(b'f3blks.bin', delay=True)
+
+
+# Get file 'f3blks.bin' with wrong acknowledgement three times
+def test_getFileWithWrongAckThreeTimes(client):
+    with pytest.raises(socket.timeout):
+        client.getFileWithWrongAck(b'f3blks.bin', 4)
+
+
+# Get file 'f3blks.bin' with wrong acknowledgement twice, then correct
+def test_getFileWithWrongAckTwiceThenCorrect(client):
+    client.getFileWithWrongAck(b'f3blks.bin', 2)
 
 
 # Get existing 50 byte file

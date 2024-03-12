@@ -70,7 +70,7 @@ class TFTPClient:
         if e:
             raise ValueError(f'Invalid block number.')
 
-    def getFile(self, fn, mode=b'octet'):
+    def getFile(self, fn, mode=b'octet', delay=False):
         buf = b''
 
         with self.newSocket() as sock:
@@ -84,17 +84,58 @@ class TFTPClient:
                 pkt = self.parsePacket(resp)
                 if pkt['op'] != OP.DAT:
                     raise ValueError(f'Opcode should be DAT, is {pkt["op"]}.')
+                if delay and pkt['bn'] < ebn:
+                    continue  # Ignore retransmitted packets only for delayed requests
                 if pkt['bn'] != ebn:
                     raise ValueError(f'Block num should be {ebn}, is {pkt["bn"]}.')
 
                 buf += pkt['data']
                 req = self.createACK(pkt['bn'])
+
+                if delay:
+                    time.sleep(8)  # delay longer than the server's timeout
+                
+                sock.sendto(req, ca)
+                ebn += 1
+
+                if len(pkt['data']) < 512:
+                    break
+
+            if not self.fileBufEq(fn, buf):
+                raise ValueError('File and buffer are not the same.')
+
+        return True
+    
+    def getFileWithWrongAck(self, fn, wrong_ack_times, mode=b'octet'):
+        buf = b''
+
+        with self.newSocket() as sock:
+            req = self.createRequest(OP.RRQ, fn, mode)
+            sock.sendto(req, self.remote)
+
+            ebn = 1
+            wrong_ack_count = 0
+            while True:
+                resp, ca = sock.recvfrom(1024)
+
+                pkt = self.parsePacket(resp)
+                if pkt['op'] != OP.DAT:
+                    raise ValueError(f'Opcode should be DAT, is {pkt["op"]}.')
+                if pkt['bn'] != ebn:
+                    raise ValueError(f'Block num should be {ebn}, is {pkt["bn"]}.')
+
+                if wrong_ack_count < wrong_ack_times:
+                    req = self.sendInvalidAck(pkt['bn'])
+                    wrong_ack_count += 1
+                else:
+                    buf += pkt['data']
+                    req = self.createACK(pkt['bn'])
+                    ebn += 1
                 sock.sendto(req, ca)
 
                 if len(pkt['data']) < 512:
                     break
 
-                ebn += 1
 
             if not self.fileBufEq(fn, buf):
                 raise ValueError('File and buffer are not the same.')
@@ -188,6 +229,9 @@ class TFTPClient:
             raise ValueError('Files are not the same.')
 
         return True
+    
+    def sendInvalidAck(self, bn):
+       return struct.pack('!HH', OP.ACK.value, bn + 1)
 
     def putFileBlocks(self, fn, sz, mode=b'octet'):
         fc = b''
