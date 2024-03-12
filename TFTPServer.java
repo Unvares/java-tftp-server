@@ -14,6 +14,7 @@ import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -137,8 +138,8 @@ public class TFTPServer {
    */
   private int ParseRQ(byte[] buf, StringBuffer requestedFile) {
     // See "TFTP Formats" in TFTP specification for the RRQ/WRQ request contents
-    int opcode = buf[0];
-    opcode += buf[1];
+    ByteBuffer wrap= ByteBuffer.wrap(buf);
+    short opcode = wrap.getShort();
     if (opcode == OP_RRQ || opcode == OP_WRQ) {
       for (int i = 2; i < BUFSIZE - 1; i++) {
         if (buf[i] == 0) {
@@ -189,6 +190,7 @@ public class TFTPServer {
         send_ERR();
       }
     } else if (opcode == OP_WRQ) {
+
       File file = new File(requestedFile);
       if (file.exists()) {
         System.out.println("The file is already present in the server. Deleting it now.");
@@ -203,7 +205,13 @@ public class TFTPServer {
         while (true) {
           DatagramPacket dataPacket = receive_DATA_send_ACK(sendSocket, blockNumber);
 
-          if (dataPacket != null) {
+          if (dataPacket == null) {
+            System.out.println("Did not recieve any data, Deleting the file!");
+            file.delete();
+            break;
+
+          } else {
+
             byte[] data = dataPacket.getData();
             writer.write(data, 4, dataPacket.getLength() - 4); // first 4 bytes are opcode and block number
 
@@ -214,10 +222,7 @@ public class TFTPServer {
               sendSocket.send(getAckPacket(blockNumber));
               break;
             }
-          } else {
-            System.out.println("Something went wrong with reciving data!");
-            file.delete();
-            break;
+
           }
         }
         writer.close();
@@ -292,22 +297,42 @@ public class TFTPServer {
   private DatagramPacket receive_DATA_send_ACK(DatagramSocket sendSocket, short blockNumber) {
     byte[] buf = new byte[BUFSIZE];
     DatagramPacket dataPacket = new DatagramPacket(buf, buf.length);
+    int tryCounter = 0;
+    DatagramPacket ackPacket = getAckPacket(blockNumber++);
+    while (true) {
+      try {
+        if (tryCounter >= 3) {
+          System.out.println("Failed to get Data, TimedOut!");
+          return null;
 
-    try {
-      DatagramPacket ackPacket = getAckPacket(blockNumber);
-      sendSocket.send(ackPacket);
-      sendSocket.receive(dataPacket);
-      short packetBlockNumber = retrieveBlockNumber(dataPacket);
-      System.out.println("Recived block number " + packetBlockNumber);
-
-      if (packetBlockNumber == ++blockNumber) {
-        return dataPacket;
+        }
+          System.out.println("sending Ack pack to: " + blockNumber);        
+          sendSocket.send(ackPacket);
+          sendSocket.setSoTimeout(2000);
+          tryCounter++; //Time out occures in the packet is not recevied in 10s 
+          sendSocket.receive(dataPacket);
+          short packetBlockNumber = retrieveBlockNumber(dataPacket);
+          System.out.println("Recived block number " + packetBlockNumber);
+    
+          if (packetBlockNumber == blockNumber) {
+            return dataPacket;
+          } else {
+            System.out.println("Incorrect packet");
+            tryCounter = 0;
+            throw new SocketTimeoutException();
+          }
+       
+      }catch (SocketTimeoutException se) {
+        System.out.println("Time out! Resending!");
+        try {
+          sendSocket.send(ackPacket);
+        } catch (IOException e) {
+          System.out.println("Couldn't send the ack packet");
+        }
+      } catch (IOException e1) {
+        System.err.println("Something gone wrong");
       }
-    } catch (IOException e) {
-      System.err.println("Something went wrong with reciving data!");
-      e.printStackTrace();
     }
-    return null;
   }
 
   private void send_ERR() {
