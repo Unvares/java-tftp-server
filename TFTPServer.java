@@ -168,7 +168,7 @@ public class TFTPServer {
    * @param requestedFile (name of file to read/write)
    * @param opcode        (RRQ or WRQ)
    */
-  private void HandleRQ(DatagramSocket sendSocket, String requestedFile, int opcode) {
+  private void HandleRQ(DatagramSocket sendSocket, String requestedFile, int opcode) throws SocketException {
     if (opcode == OP_RRQ) {
       // Open the file
       Path filePath = Paths.get(requestedFile);
@@ -195,8 +195,9 @@ public class TFTPServer {
         }
         System.out.println("Received last acknowledgment!");
       } catch (IOException e) {
-        System.err.println("Error reading file: " + e.getMessage());
+        System.err.println("IOException: " + e.getMessage());
         send_ERR();
+        throw new SocketException("File reading failed.");
       }
     } else if (opcode == OP_WRQ) {
       File file = new File(requestedFile);
@@ -214,12 +215,10 @@ public class TFTPServer {
           DatagramPacket dataPacket = receive_DATA_send_ACK(sendSocket, blockNumber);
 
           if (dataPacket == null) {
-            System.out.println("No data received. Deleting the file!\n");
             file.delete();
             break;
 
           } else {
-
             byte[] data = dataPacket.getData();
             writer.write(data, 4, dataPacket.getLength() - 4); // first 4 bytes are opcode and block number
 
@@ -227,7 +226,7 @@ public class TFTPServer {
 
             if (dataPacket.getLength() - 4 < 512) {
               System.out.println("Received last packet!");
-              sendSocket.send(getAckPacket(blockNumber));
+              sendSocket.send(createAckPacket(blockNumber));
               break;
             }
           }
@@ -236,6 +235,8 @@ public class TFTPServer {
       } catch (IOException e) {
         System.err.println("IOException: " + e.getMessage());
         file.delete();
+        send_ERR();
+        throw new SocketException("File writing failed.");
       }
     } else {
       System.err.println("Invalid request. Sending an error packet.\n");
@@ -297,7 +298,7 @@ public class TFTPServer {
           throw new IOException("Received incorrect block number");
         }
       } catch (IOException e) {
-          System.err.println("Error occurred: " + e.getMessage() + ". Retransmitting packet with block number " + blockNumber + ".");
+          System.err.println("IOException: " + e.getMessage() + ". Retransmitting block number " + blockNumber + ".");
           retransmissions++;
           if (retransmissions >= MAX_RETRANSMISSIONS) {
               throw new SocketException("Max retransmissions reached for packet " + blockNumber + ". Aborting.");
@@ -313,41 +314,32 @@ public class TFTPServer {
    * @param sendSocket The sender Socket
    * @param blockNumber The current block number.
    * @return The recived data if its correct block number.
+   * @throws SocketTimeoutException 
    */
   private DatagramPacket receive_DATA_send_ACK(DatagramSocket sendSocket, short blockNumber) {
     byte[] buf = new byte[BUFSIZE];
     DatagramPacket dataPacket = new DatagramPacket(buf, buf.length);
     int retransmissions = 0;
-    DatagramPacket ackPacket = getAckPacket(blockNumber++);
+    DatagramPacket ackPacket = createAckPacket(blockNumber);
     while (true) {
-      try {
-        if (retransmissions >= 3) {
-          System.out.println("Failed to get Data, TimedOut!\n");
-          return null;
-        }
-          sendSocket.send(ackPacket);
-          retransmissions++; //Time out occures in the packet is not recevied in 10s 
-          sendSocket.receive(dataPacket);
-          short packetBlockNumber = retrieveBlockNumber(dataPacket);
-    
-          if (packetBlockNumber == blockNumber) {
-            return dataPacket;
-          } else {
-            System.out.println("Received incorrect packet");
-            retransmissions = 0;
-            throw new SocketTimeoutException();
-          }
-       
-      }catch (SocketTimeoutException se) {
-        System.out.println("Timeout! Resending acknowledgment!\n");
         try {
           sendSocket.send(ackPacket);
+          sendSocket.receive(dataPacket);
+          short packetBlockNumber = retrieveBlockNumber(dataPacket);
+          
+          if (packetBlockNumber == ++blockNumber) {
+            return dataPacket;
+          } else {
+            throw new IOException("Incorrect block number");
+          }
         } catch (IOException e) {
-          System.out.println("Failed to send the acknowledgment packet\n");
+          System.out.println("IOException: " + e.getMessage() + ". Retransmitting acknowledgement number " + blockNumber);
+          retransmissions++;
+          if (retransmissions >= 3) {
+            System.err.println("Max retransmissions reached on packet " + blockNumber + ". Aborting.");
+            return null;
+          }
         }
-      } catch (IOException e1) {
-        System.err.println("Unexpected error occurred\n");
-      }
     }
   }
 
@@ -361,7 +353,7 @@ public class TFTPServer {
    * @param blockNum The block number.
    * @return The packet.
    */
-  private DatagramPacket getAckPacket(short blockNum) {
+  private DatagramPacket createAckPacket(short blockNum) {
     byte[] acknowledgementPacket = new byte[4];
     acknowledgementPacket[0] = (byte) (OP_ACK >> 8);
     acknowledgementPacket[1] = (byte) OP_ACK;

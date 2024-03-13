@@ -84,8 +84,8 @@ class TFTPClient:
                 pkt = self.parsePacket(resp)
                 if pkt['op'] != OP.DAT:
                     raise ValueError(f'Opcode should be DAT, is {pkt["op"]}.')
-                if delay and pkt['bn'] < ebn:
-                    continue  # Ignore retransmitted packets only for delayed requests
+                if pkt['bn'] < ebn:
+                    continue  # Ignore handled retransmitted packets
                 if pkt['bn'] != ebn:
                     raise ValueError(f'Block num should be {ebn}, is {pkt["bn"]}.')
 
@@ -275,26 +275,39 @@ class TFTPClient:
 
     # Send initial WRQ, then don't send any data at all
     def putFileFailData(self, fn, sz, mode=b'octet'):
+        fc = b''
         with self.newSocket() as sock:
-            
-            # Initial WRQ
             req = self.createRequest(OP.WRQ, fn, mode)
             sock.sendto(req, self.remote)
-            # Receive initial response ACK three times
-            try:
-                for _ in range(3):
-                    resp, ca = sock.recvfrom(1024)
-                    pkt = self.parsePacket(resp)
-                    self.checkACK(pkt['op'], pkt['bn'] != 0)
-                    time.sleep(4)
-            except socket.timeout:
-                raise ValueError('Timeout waiting for ACK.')
-            # There should be EXACTLY three transmissions (orig + 2 re),
-            # so this 4th one should timeout
             try:
                 resp, ca = sock.recvfrom(1024)
+
                 pkt = self.parsePacket(resp)
                 self.checkACK(pkt['op'], pkt['bn'] != 0)
+
+                blk = 1
+                while blk <= sz:
+                    sbuf = np.random.bytes(512)
+                    req = self.createDATBuf(sbuf, blk)
+                    sock.sendto(req, ca)
+                    
+                    resp, _ = sock.recvfrom(1024)
+                    pkt = self.parsePacket(resp)
+
+                    if pkt['bn'] < blk:
+                        continue # ignore handled retransmitted packages
+                    
+                    self.checkACK(pkt['op'], pkt['bn'] != blk)
+                    blk += 1
+
+                    time.sleep(8)
+
+                req = self.createDATBuf(b'', sz + 1)
+                sock.sendto(req, ca)
+
+                resp, ca = sock.recvfrom(1024)
+                pkt = self.parsePacket(resp)
+                self.checkACK(pkt['op'], pkt['bn'] != sz + 1)
             except socket.timeout:
-                pass
+                raise socket.timeout('Socked timed out.')
         return True
