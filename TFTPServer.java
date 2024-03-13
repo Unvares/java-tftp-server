@@ -37,7 +37,7 @@ public class TFTPServer {
 
   public static void main(String[] args) {
     if (args.length > 0) {
-      System.err.printf("usage: java %s\n", TFTPServer.class.getCanonicalName());
+      System.err.printf("Invalid usage. Correct usage: java %s\n", TFTPServer.class.getCanonicalName());
       System.exit(1);
     }
     // Starting the server
@@ -45,7 +45,7 @@ public class TFTPServer {
       TFTPServer server = new TFTPServer();
       server.start();
     } catch (SocketException e) {
-      e.printStackTrace();
+      System.err.println("SocketException: " + e.getMessage());
     }
   }
 
@@ -59,7 +59,7 @@ public class TFTPServer {
     SocketAddress localBindPoint = new InetSocketAddress(TFTPPORT);
     socket.bind(localBindPoint);
 
-    System.out.printf("Listening at port %d for new requests\n", TFTPPORT);
+    System.out.printf("Server started. Listening at port %d for new requests\n", TFTPPORT);
 
     // Loop to handle client requests
     while (true) {
@@ -74,15 +74,15 @@ public class TFTPServer {
 
       new Thread() {
         public void run() {
+          DatagramSocket sendSocket = null;
           try {
-            DatagramSocket sendSocket = new DatagramSocket(0);
-
+            sendSocket = new DatagramSocket(0);
             // Connect to client
             sendSocket.connect(clientAddress);
             // Set the timeout for the socket
             sendSocket.setSoTimeout(TIMEOUT);
 
-            System.out.printf("\n%s request for %s from %s using port %d\n",
+            System.out.printf("\nReceived %s request for %s from %s using port %d\n",
                 (reqtype == OP_RRQ) ? "Read" : "Write",
                 requestedFile.toString(),
                 clientAddress.getHostName(),
@@ -98,9 +98,14 @@ public class TFTPServer {
             } else {
               send_ERR();
             }
-            sendSocket.close();
+            System.out.println("Request completed. Closing connection.");
           } catch (SocketException e) {
-            e.printStackTrace();
+            System.err.println("SocketException: " + e.getMessage());
+            System.out.println("Request failed. Closing connection.");
+          } finally {
+            if (sendSocket != null) {
+              sendSocket.close();
+            }
           }
         }
       }.start();
@@ -128,7 +133,7 @@ public class TFTPServer {
 
       return socketAddress;
     } catch (IOException e) {
-      e.printStackTrace();
+      System.err.println("IOException: " + e.getMessage());
       return null;
     }
   }
@@ -179,7 +184,7 @@ public class TFTPServer {
 
           boolean result = send_DATA_receive_ACK(sendSocket, fileData, blockNumber);
           if (!result) {
-            System.err.println("Error sending data or receiving acknowledgment");
+            System.err.println("Error occurred while sending data or receiving acknowledgment");
             send_ERR();
             return;
           }
@@ -188,15 +193,15 @@ public class TFTPServer {
           bytesRead = fileChannel.read(buffer);
           blockNumber++;
         }
+        System.out.println("Received last acknowledgment!");
       } catch (IOException e) {
-        System.err.println("Error reading file: " + e.getMessage() + "\n");
+        System.err.println("Error reading file: " + e.getMessage());
         send_ERR();
       }
     } else if (opcode == OP_WRQ) {
-
       File file = new File(requestedFile);
       if (file.exists()) {
-        System.out.println("The file is already present in the server. Deleting it now.");
+        System.out.println("File already exists on the server. Deleting it now.");
         file.delete();
       }
       try {
@@ -209,7 +214,7 @@ public class TFTPServer {
           DatagramPacket dataPacket = receive_DATA_send_ACK(sendSocket, blockNumber);
 
           if (dataPacket == null) {
-            System.out.println("Did not recieve any data, Deleting the file!");
+            System.out.println("No data received. Deleting the file!\n");
             file.delete();
             break;
 
@@ -221,7 +226,7 @@ public class TFTPServer {
             blockNumber++;
 
             if (dataPacket.getLength() - 4 < 512) {
-              System.out.println("Last packet recived");
+              System.out.println("Received last packet!");
               sendSocket.send(getAckPacket(blockNumber));
               break;
             }
@@ -229,10 +234,11 @@ public class TFTPServer {
         }
         writer.close();
       } catch (IOException e) {
+        System.err.println("IOException: " + e.getMessage());
         file.delete();
       }
     } else {
-      System.err.println("Invalid request. Sending an error packet. \n");
+      System.err.println("Invalid request. Sending an error packet.\n");
       send_ERR();
       return;
     }
@@ -286,12 +292,12 @@ public class TFTPServer {
         if (opcode == OP_ACK && receivedBlockNumber == blockNumber) {
           return true;
         } else if (opcode != OP_ACK) {
-          throw new IOException("Received wrong opcode");
+          throw new IOException("Received incorrect opcode");
         } else {
-          throw new IOException("Received wrong block number");
+          throw new IOException("Received incorrect block number");
         }
       } catch (IOException e) {
-          System.err.println("Error occurred: " + e.getMessage() + ". Retransmitting packet.");
+          System.err.println("Error occurred: " + e.getMessage() + ". Retransmitting packet with block number " + blockNumber + ".");
           retransmissions++;
           if (retransmissions >= MAX_RETRANSMISSIONS) {
               throw new SocketException("Max retransmissions reached for packet " + blockNumber + ". Aborting.");
@@ -316,33 +322,31 @@ public class TFTPServer {
     while (true) {
       try {
         if (retransmissions >= 3) {
-          System.out.println("Failed to get Data, TimedOut!");
+          System.out.println("Failed to get Data, TimedOut!\n");
           return null;
         }
-          System.out.println("sending Ack pack to: " + blockNumber);        
           sendSocket.send(ackPacket);
           retransmissions++; //Time out occures in the packet is not recevied in 10s 
           sendSocket.receive(dataPacket);
           short packetBlockNumber = retrieveBlockNumber(dataPacket);
-          System.out.println("Recived block number " + packetBlockNumber);
     
           if (packetBlockNumber == blockNumber) {
             return dataPacket;
           } else {
-            System.out.println("Incorrect packet");
+            System.out.println("Received incorrect packet");
             retransmissions = 0;
             throw new SocketTimeoutException();
           }
        
       }catch (SocketTimeoutException se) {
-        System.out.println("Time out! Resending!");
+        System.out.println("Timeout! Resending acknowledgment!\n");
         try {
           sendSocket.send(ackPacket);
         } catch (IOException e) {
-          System.out.println("Couldn't send the ack packet");
+          System.out.println("Failed to send the acknowledgment packet\n");
         }
       } catch (IOException e1) {
-        System.err.println("Something gone wrong");
+        System.err.println("Unexpected error occurred\n");
       }
     }
   }
