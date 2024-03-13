@@ -193,7 +193,6 @@ public class TFTPServer {
         send_ERR();
       }
     } else if (opcode == OP_WRQ) {
-
       File file = new File(requestedFile);
       if (file.exists()) {
         System.out.println("The file is already present in the server. Deleting it now.");
@@ -209,12 +208,11 @@ public class TFTPServer {
           DatagramPacket dataPacket = receive_DATA_send_ACK(sendSocket, blockNumber);
 
           if (dataPacket == null) {
-            System.out.println("Did not recieve any data, Deleting the file!");
+            System.out.println("Did not recieve any data. Deleting the file!");
             file.delete();
             break;
 
           } else {
-
             byte[] data = dataPacket.getData();
             writer.write(data, 4, dataPacket.getLength() - 4); // first 4 bytes are opcode and block number
 
@@ -229,7 +227,8 @@ public class TFTPServer {
         }
         writer.close();
       } catch (IOException e) {
-        file.delete();
+        System.err.println("Error writing file: " + e.getMessage() + "\n");
+        send_ERR();
       }
     } else {
       System.err.println("Invalid request. Sending an error packet. \n");
@@ -307,43 +306,34 @@ public class TFTPServer {
    * @param sendSocket The sender Socket
    * @param blockNumber The current block number.
    * @return The recived data if its correct block number.
+   * @throws SocketTimeoutException 
    */
   private DatagramPacket receive_DATA_send_ACK(DatagramSocket sendSocket, short blockNumber) {
     byte[] buf = new byte[BUFSIZE];
     DatagramPacket dataPacket = new DatagramPacket(buf, buf.length);
     int retransmissions = 0;
-    DatagramPacket ackPacket = getAckPacket(blockNumber++);
+    DatagramPacket ackPacket = getAckPacket(blockNumber);
     while (true) {
-      try {
-        if (retransmissions >= 3) {
-          System.out.println("Failed to get Data, TimedOut!");
-          return null;
-        }
-          System.out.println("sending Ack pack to: " + blockNumber);        
+        try {
+          System.out.println("sending Ack pack: " + blockNumber);        
           sendSocket.send(ackPacket);
-          retransmissions++; //Time out occures in the packet is not recevied in 10s 
           sendSocket.receive(dataPacket);
           short packetBlockNumber = retrieveBlockNumber(dataPacket);
           System.out.println("Recived block number " + packetBlockNumber);
-    
-          if (packetBlockNumber == blockNumber) {
+          
+          if (packetBlockNumber == ++blockNumber) {
             return dataPacket;
           } else {
-            System.out.println("Incorrect packet");
-            retransmissions = 0;
-            throw new SocketTimeoutException();
+            throw new IOException("Incorrect block number");
           }
-       
-      }catch (SocketTimeoutException se) {
-        System.out.println("Time out! Resending!");
-        try {
-          sendSocket.send(ackPacket);
         } catch (IOException e) {
-          System.out.println("Couldn't send the ack packet");
+          System.out.println(e.getMessage());
+          retransmissions++;
+          if (retransmissions >= 3) {
+            System.err.println("Max retransmissions reached for packet " + blockNumber + ". Aborting.\n");
+            return null;
+          }
         }
-      } catch (IOException e1) {
-        System.err.println("Something gone wrong");
-      }
     }
   }
 
