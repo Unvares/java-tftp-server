@@ -84,8 +84,8 @@ class TFTPClient:
                 pkt = self.parsePacket(resp)
                 if pkt['op'] != OP.DAT:
                     raise ValueError(f'Opcode should be DAT, is {pkt["op"]}.')
-                if delay and pkt['bn'] < ebn:
-                    continue  # Ignore retransmitted packets only for delayed requests
+                if pkt['bn'] < ebn:
+                    continue  # Ignore handled retransmitted packets
                 if pkt['bn'] != ebn:
                     raise ValueError(f'Block num should be {ebn}, is {pkt["bn"]}.')
 
@@ -277,28 +277,37 @@ class TFTPClient:
     def putFileFailData(self, fn, sz, mode=b'octet'):
         fc = b''
         with self.newSocket() as sock:
-            sock.settimeout(1)
             req = self.createRequest(OP.WRQ, fn, mode)
             sock.sendto(req, self.remote)
-            resp, ca = sock.recvfrom(1024)
             try:
                 resp, ca = sock.recvfrom(1024)
 
                 pkt = self.parsePacket(resp)
                 self.checkACK(pkt['op'], pkt['bn'] != 0)
 
-                for blk in range(1, sz + 1):
-                    time.sleep(8)
+                blk = 1
+                while blk <= sz:
                     sbuf = np.random.bytes(512)
                     req = self.createDATBuf(sbuf, blk)
                     sock.sendto(req, ca)
                     
-                    try:
-                        resp, _ = sock.recvfrom(1024)
-                        pkt = self.parsePacket(resp)
-                        self.checkACK(pkt['op'], pkt['bn'] != blk)
-                    except socket.timeout:
-                        raise socket.timeout('Timeout waiting for ACK.')
+                    resp, _ = sock.recvfrom(1024)
+                    pkt = self.parsePacket(resp)
+
+                    if pkt['bn'] < blk:
+                        continue # ignore handled retransmitted packages
+                    
+                    self.checkACK(pkt['op'], pkt['bn'] != blk)
+                    blk += 1
+
+                    time.sleep(8)
+
+                req = self.createDATBuf(b'', sz + 1)
+                sock.sendto(req, ca)
+
+                resp, ca = sock.recvfrom(1024)
+                pkt = self.parsePacket(resp)
+                self.checkACK(pkt['op'], pkt['bn'] != sz + 1)
             except socket.timeout:
-                raise socket.timeout('Timeout waiting for initial response from server.')
+                raise socket.timeout('Socked timed out.')
         return True
